@@ -57,7 +57,6 @@ var cmdList = &cobra.Command{
 		if err != nil {
 			log.Fatal(err)
 		}
-		//fmt.Println("Vcenter: " + strings.Join(args, " "))
 	},
 }
 
@@ -73,36 +72,6 @@ var cmdRemove = &cobra.Command{
 		}
 	},
 }
-
-//var cmdEntryAdd = &cobra.Command{
-//	Use:   "add <ip> <username> <password>",
-//	Short: "Add a vcenter entry",
-//	Args:  cobra.MinimumNArgs(3),
-//	Run: func(cmd *cobra.Command, args []string) {
-//		entry := vmware.Entry{
-//			Ip:       args[0],
-//			UserName: args[1],
-//			PassWord: args[2],
-//		}
-//
-//		err := vcEntryAdd(entry)
-//		if err != nil {
-//			fmt.Printf("Failed to add vcenter entry. %v\n", err)
-//		}
-//	},
-//}
-
-//var cmdEntryRemove = &cobra.Command{
-//	Use:   "remove <ip>",
-//	Short: "Remove a vcenter entry",
-//	Args:  cobra.MinimumNArgs(1),
-//	Run: func(cmd *cobra.Command, args []string) {
-//		err := vcEntryRemove(args[0])
-//		if err != nil {
-//			fmt.Printf("Failed to remove vcenter entry. %v\n", err)
-//		}
-//	},
-//}
 
 func init() {
 	//cmdAdd.AddCommand(cmdryAdd)
@@ -152,16 +121,38 @@ func entryRemove() error {
 	rms, err := fuzzyFilter(func(in io.WriteCloser) {
 		tw := tabwriter.NewWriter(in, 2, 0, 2, ' ', 0)
 		for _, conn := range conns {
-			fmt.Fprintf(tw, "%-16s\t", conn.Hostname)
-			fmt.Fprintf(tw, "%-10s\t", conn.User)
-			fmt.Fprintf(tw, "%-10s\t", conn.Pass)
-			fmt.Fprintf(tw, "%s\t", conn.Desc)
+			fmt.Fprintf(tw, "%-16s,", conn.Hostname)
+			fmt.Fprintf(tw, "%-10s,", conn.User)
+			fmt.Fprintf(tw, "%-10s,", conn.Pass)
+			fmt.Fprintf(tw, "%s", conn.Desc)
 			fmt.Fprintf(tw, "\n")
 
 			_ = tw.Flush()
 		}
-	})
-	fmt.Println(rms)
+	}, true)
+	//fmt.Println(rms)
+
+	newConns := []model.Conn{}
+	rmHosts := make(map[string]struct{})
+	for _, r := range rms {
+		splits := strings.Split(r, ",")
+		if len(splits) < 4 {
+			continue
+		}
+		rmHosts[strings.TrimSpace(splits[0])] = struct{}{}
+	}
+
+	for _, c := range conns {
+		_, ok := rmHosts[c.Hostname]
+		if !ok {
+			newConns = append(newConns, c)
+		}
+	}
+
+	//err = writeConfig(conns)
+	//if err != nil {
+	//	return err
+	//}
 
 	return nil
 }
@@ -186,6 +177,41 @@ func readConfig() ([]model.Conn, error) {
 	return conns, nil
 }
 
+func selectConnection() (*model.Conn, error) {
+	conns, err := readConfig()
+	if err != nil {
+		return nil, err
+	}
+	connMap := make(map[string]model.Conn)
+	for _, conn := range conns {
+		connMap[conn.Hostname] = conn
+	}
+
+	sel, err := fuzzyFilter(func(in io.WriteCloser) {
+		tw := tabwriter.NewWriter(in, 2, 0, 2, ' ', 0)
+		for _, conn := range conns {
+			fmt.Fprintf(tw, "%-16s,", conn.Hostname)
+			fmt.Fprintf(tw, "%-10s,", conn.User)
+			fmt.Fprintf(tw, "%-10s,", conn.Pass)
+			fmt.Fprintf(tw, "%s", conn.Desc)
+			fmt.Fprintf(tw, "\n")
+
+			_ = tw.Flush()
+		}
+	}, false)
+
+	splits := strings.Split(sel[0], ",")
+	if len(splits) < 4 {
+		return nil, fmt.Errorf("Bad entry:[%s]", sel)
+	}
+
+	conn, ok := connMap[strings.TrimSpace(splits[0])]
+	if !ok {
+		return nil, fmt.Errorf("Entry not found with key:[%s]", splits[0])
+	}
+	return &conn, nil
+}
+
 func writeConfig(conns []model.Conn) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -205,8 +231,13 @@ func writeConfig(conns []model.Conn) error {
 	return nil
 }
 
-func fuzzyFilter(input func(in io.WriteCloser)) ([]string, error) {
-	cmd := exec.Command("fzf", "-m")
+func fuzzyFilter(input func(in io.WriteCloser), multi bool) ([]string, error) {
+	var cmd *exec.Cmd
+	if multi {
+		cmd = exec.Command("fzf", "-m")
+	} else {
+		cmd = exec.Command("fzf")
+	}
 	cmd.Stderr = os.Stderr
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -225,8 +256,13 @@ func fuzzyFilter(input func(in io.WriteCloser)) ([]string, error) {
 	return strings.Split(string(result), "\n"), nil
 }
 
-func fuzzySearch(inputs []string) ([]string, error) {
-	cmd := exec.Command("fzf", "-m")
+func fuzzySearch(inputs []string, multi bool) ([]string, error) {
+	var cmd *exec.Cmd
+	if multi {
+		cmd = exec.Command("fzf", "-m")
+	} else {
+		cmd = exec.Command("fzf")
+	}
 	cmd.Stderr = os.Stderr
 	in, err := cmd.StdinPipe()
 	if err != nil {
