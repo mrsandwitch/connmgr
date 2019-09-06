@@ -177,7 +177,7 @@ func readConfig() ([]model.Conn, error) {
 	return conns, nil
 }
 
-func selectConnection() (*model.Conn, error) {
+func selectConnection(multi bool) (*model.Conn, error) {
 	conns, err := readConfig()
 	if err != nil {
 		return nil, err
@@ -198,7 +198,7 @@ func selectConnection() (*model.Conn, error) {
 
 			_ = tw.Flush()
 		}
-	}, false)
+	}, multi)
 
 	splits := strings.Split(sel[0], ",")
 	if len(splits) < 4 {
