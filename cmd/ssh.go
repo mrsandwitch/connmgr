@@ -195,6 +195,7 @@ func enableRootAccess() error {
 	}
 
 	for _, conn := range conns {
+		// Create a temp script to echo the SSH password, used by SSH_ASKPASS
 		script := fmt.Sprintf(`
 			#!/bin/sh
 			echo "%s"
@@ -208,8 +209,15 @@ func enableRootAccess() error {
 
 		addr := conn.User + "@" + conn.Hostname
 
+		// LogLevel error is to suppress the hosts warning. The others are
+		// necessary if working with development servers with self-signed
+		// certificates.
+		sshOptLogLevel := "-oLogLevel=error"
+		sshOptHostkeyCheck := "-oStrictHostKeyChecking=no"
+		sshOptKnownHostFile := "-oUserKnownHostsFile=/dev/null"
+
 		bashCmd := fmt.Sprintf("echo %s | sudo -S whoami; sudo mkdir -p /root/.ssh/ /var/services/homes/admin; sudo /bin/bash -c 'echo %s >> /root/.ssh/authorized_keys'", conn.Pass, pubKey)
-		cmd := exec.Command("setsid", "ssh", "-t", "-oLogLevel=error", "-oStrictHostKeyChecking=no", "-oUserKnownHostsFile=/dev/null", addr, bashCmd)
+		cmd := exec.Command("setsid", "ssh", "-t", sshOptLogLevel, sshOptHostkeyCheck, sshOptKnownHostFile, addr, bashCmd)
 
 		out, err := cmd.CombinedOutput()
 		if err != nil {
