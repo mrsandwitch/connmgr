@@ -21,6 +21,9 @@ func init() {
 	rootCmd.AddCommand(cmdConnect)
 	rootCmd.AddCommand(cmdEnableSsh)
 	rootCmd.AddCommand(cmdCommand)
+	rootCmd.AddCommand(cmdScp)
+	rootCmd.AddCommand(cmdIscp)
+	rootCmd.AddCommand(cmdBackup)
 }
 
 func Execute() {

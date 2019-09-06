@@ -3,7 +3,6 @@ package cmd
 import (
 	"bufio"
 	"bytes"
-	"connmgr/model"
 	"fmt"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
@@ -54,8 +53,34 @@ var cmdCommand = &cobra.Command{
 	},
 }
 
+var cmdScp = &cobra.Command{
+	Use:   "cp <src> <remote_dst>",
+	Short: "Copy file to a host",
+	Long:  `Copy file to a host`,
+	Args:  cobra.MinimumNArgs(2),
+	Run: func(cmd *cobra.Command, args []string) {
+		err := scp(args[0], args[1])
+		if err != nil {
+			os.Exit(1)
+		}
+	},
+}
+
+var cmdIscp = &cobra.Command{
+	Use:   "icp <remote_src> <dst>",
+	Short: "Copy file from a host",
+	Long:  `Copy file from a host`,
+	Args:  cobra.MinimumNArgs(2),
+	Run: func(cmd *cobra.Command, args []string) {
+		err := iscp(args[0], args[1])
+		if err != nil {
+			os.Exit(1)
+		}
+	},
+}
+
 func connect() error {
-	conn, err := selectConnection(false)
+	conn, err := selectSingleConnection()
 	if err != nil {
 		return err
 	}
@@ -110,6 +135,28 @@ func getHostKey(host string) (ssh.PublicKey, error) {
 	return hostKey, nil
 }
 
+func getSigner() (ssh.Signer, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+
+	key, err := ioutil.ReadFile(home + "/.ssh/id_rsa")
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+
+	signer, err := ssh.ParsePrivateKey(key)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+
+	return signer, nil
+}
+
 // reference form remote-ssh-key-setup.sh
 //
 func enableRootAccess() error {
@@ -141,65 +188,41 @@ func enableRootAccess() error {
 		return err
 	}
 
-	conn := model.Conn{
-		Hostname: "bush415p.syno",
-		User:     "admin",
-		Pass:     "aaaaaa",
-		Desc:     "",
-	}
-	//conn, err := selectConnection(true)
-	//if err != nil {
-	//	log.Println(err)
-	//	return err
-	//}
-
-	script := fmt.Sprintf(`
-		#!/bin/sh
-		echo "%s"
-	`, conn.Pass)
-
-	err = ioutil.WriteFile("/tmp/ssh-askpass.sh", []byte(script), 0755)
+	conns, err := selectConnections(true)
 	if err != nil {
 		log.Println(err)
 		return err
 	}
-	//return nil
 
-	addr := conn.User + "@" + conn.Hostname
-	//cmd := exec.Command("ssh", addr, "su", "cat >> /root/.ssh/authorized_keys")
-	//cmd := exec.Command("ssh", addr, "sudo -i")
-	//cmd.Stdin = keyFile
+	for _, conn := range conns {
+		script := fmt.Sprintf(`
+			#!/bin/sh
+			echo "%s"
+		`, conn.Pass)
 
-	//bashCmd := fmt.Sprintf("echo %s | sudo mkdir -p /root/.ssh/ /var/services/homes/admin; echo %s >> /root/.ssh/authorized_keys2", conn.Pass, string(pub))
-	//bashCmd := fmt.Sprintf("echo hello1 > /tmp/test1")
-	//bashCmd := fmt.Sprintf("mkdir -p /root/.ssh/ /var/services/homes/admin; echo %s >> /root/.ssh/authorized_keys2", conn.Pass, string(pub))
-	//bashCmd := fmt.Sprintf("echo aaaaaa | sudo -S whoami; echo hello2 > /tmp/test1")
-	bashCmd := fmt.Sprintf("echo %s | sudo -S whoami; sudo mkdir -p /root/.ssh/ /var/services/homes/admin; sudo /bin/bash -c 'echo %s >> /root/.ssh/authorized_keys'", conn.Pass, pubKey)
-	//bashCmd := fmt.Sprintf("echo %s | sudo -S whoami; sudo mkdir -p /root/.ssh/ /var/services/homes/admin;", conn.Pass)
-	//bashCmd2 := fmt.Sprintf("echo %s | sudo -S whoami; sudo /bin/bash -c 'echo %s >> /root/.ssh/authorized_keys2'", conn.Pass, pubKey)
+		err = ioutil.WriteFile("/tmp/ssh-askpass.sh", []byte(script), 0755)
+		if err != nil {
+			log.Println(err)
+			return err
+		}
 
-	//cmd := exec.Command("setsid", "ssh", "-t", "-oLogLevel=error", "-oStrictHostKeyChecking=no", "-oUserKnownHostsFile=/dev/null", addr, "bash", "-c", "echo aaaaaa; echo hello2 > /tmp/test1")
-	//cmd := exec.Command("setsid", "ssh", "-t", "-oLogLevel=error", "-oStrictHostKeyChecking=no", "-oUserKnownHostsFile=/dev/null", addr, "bash", "-c", bashCmd)
-	//cmd := exec.Command("setsid", "ssh", "-t", "-oLogLevel=error", "-oStrictHostKeyChecking=no", "-oUserKnownHostsFile=/dev/null", addr, bashCmd)
-	cmd := exec.Command("setsid", "ssh", "-t", "-oLogLevel=error", "-oStrictHostKeyChecking=no", "-oUserKnownHostsFile=/dev/null", addr, bashCmd)
+		addr := conn.User + "@" + conn.Hostname
 
-	out, err := cmd.CombinedOutput()
-	//out, err := cmd.Output()
-	//err = cmd.Run()
-	if err != nil {
-		panic(err)
+		bashCmd := fmt.Sprintf("echo %s | sudo -S whoami; sudo mkdir -p /root/.ssh/ /var/services/homes/admin; sudo /bin/bash -c 'echo %s >> /root/.ssh/authorized_keys'", conn.Pass, pubKey)
+		cmd := exec.Command("setsid", "ssh", "-t", "-oLogLevel=error", "-oStrictHostKeyChecking=no", "-oUserKnownHostsFile=/dev/null", addr, bashCmd)
+
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(string(out))
 	}
-	fmt.Println(string(out))
 
 	return nil
 }
 
-func scp() error {
-	return nil
-}
-
-func command(cmd string) error {
-	conn, err := selectConnection(false)
+func scp(src, dst string) error {
+	conn, err := selectSingleConnection()
 	if err != nil {
 		log.Println(err)
 		return err
@@ -207,17 +230,55 @@ func command(cmd string) error {
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		log.Println(err)
 		return err
 	}
 
-	key, err := ioutil.ReadFile(home + "/.ssh/id_rsa")
+	remote := fmt.Sprintf("root@%s:/%s", conn.Hostname, dst)
+	cmd := exec.Command("scp", "-r", "-i", home+"/.ssh/id_rsa", src, remote)
+
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	err = cmd.Run()
+	if err != nil {
+		panic(err)
+	}
+
+	return nil
+}
+
+func iscp(src, dst string) error {
+	conn, err := selectSingleConnection()
 	if err != nil {
 		log.Println(err)
 		return err
 	}
 
-	signer, err := ssh.ParsePrivateKey(key)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	remote := fmt.Sprintf("root@%s:/%s", conn.Hostname, src)
+	cmd := exec.Command("scp", "-r", "-i", home+"/.ssh/id_rsa", remote, dst)
+
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	err = cmd.Run()
+	if err != nil {
+		panic(err)
+	}
+
+	return nil
+}
+
+func command(cmd string) error {
+	conn, err := selectSingleConnection()
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+
+	signer, err := getSigner()
 	if err != nil {
 		log.Println(err)
 		return err

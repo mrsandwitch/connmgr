@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	//"bytes"
 	"connmgr/model"
 	"encoding/json"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 )
@@ -32,16 +32,22 @@ var cmdAdd = &cobra.Command{
 			user, pass = pass, user
 		}
 
+		key, err := findUnusedKey()
+		if err != nil {
+			os.Exit(1)
+		}
+
 		conn := model.Conn{
+			Key:      key,
 			Hostname: args[0],
 			User:     user,
 			Pass:     pass,
 			Desc:     desc,
 		}
 
-		err := entryAdd(conn)
+		err = entryAdd(conn)
 		if err != nil {
-			log.Fatal(err)
+			os.Exit(1)
 		}
 		fmt.Printf("%s is added\n", args[0])
 	},
@@ -55,7 +61,7 @@ var cmdList = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		err := entryList()
 		if err != nil {
-			log.Fatal(err)
+			os.Exit(1)
 		}
 	},
 }
@@ -68,13 +74,72 @@ var cmdRemove = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		err := entryRemove()
 		if err != nil {
-			log.Fatal(err)
+			os.Exit(1)
+		}
+	},
+}
+
+var cmdBackup = &cobra.Command{
+	Use:   "back",
+	Short: "Backup connection config",
+	Long:  `Backup connection config`,
+	Args:  cobra.MinimumNArgs(0),
+	Run: func(cmd *cobra.Command, args []string) {
+		err := backup()
+		if err != nil {
+			os.Exit(1)
 		}
 	},
 }
 
 func init() {
 	//cmdAdd.AddCommand(cmdryAdd)
+}
+
+const DEFAULT_CONF_PATH = "/.connmgr/conn.json"
+const DEFAULT_BACKUP_CONF_PATH = "/.connmgr/conn.json.bkp"
+
+func getConfigPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "/root" + DEFAULT_CONF_PATH
+	}
+
+	return home + DEFAULT_CONF_PATH
+}
+
+func getBackupConfigPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "/root" + DEFAULT_BACKUP_CONF_PATH
+	}
+
+	return home + DEFAULT_BACKUP_CONF_PATH
+}
+
+func findUnusedKey() (string, error) {
+	conns, err := readConfig()
+	if err != nil {
+		return "", err
+	}
+
+	m := make(map[string]struct{})
+	for _, conn := range conns {
+		m[conn.Key] = struct{}{}
+	}
+
+	for i := 1; i < len(conns)+20; i++ {
+		key := "node-" + strconv.Itoa(i)
+
+		_, ok := m[key]
+		if ok {
+			continue
+		}
+
+		return key, nil
+	}
+
+	return "", fmt.Errorf("Failed to find unused key")
 }
 
 func entryAdd(entry model.Conn) error {
@@ -85,7 +150,7 @@ func entryAdd(entry model.Conn) error {
 
 	conns = append(conns, entry)
 
-	err = writeConfig(conns)
+	err = writeConfig(conns, getConfigPath())
 	if err != nil {
 		return err
 	}
@@ -100,10 +165,11 @@ func entryList() error {
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 2, 0, 2, ' ', 0)
 	for _, conn := range conns {
-		fmt.Fprintf(tw, "%-16s\t", conn.Hostname)
-		fmt.Fprintf(tw, "%-10s\t", conn.User)
-		fmt.Fprintf(tw, "%-10s\t", conn.Pass)
-		fmt.Fprintf(tw, "%s\t", conn.Desc)
+		fmt.Fprintf(tw, "%-8s", conn.Key)
+		fmt.Fprintf(tw, "%-16s", conn.Hostname)
+		fmt.Fprintf(tw, "%-10s", conn.User)
+		fmt.Fprintf(tw, "%-10s", conn.Pass)
+		fmt.Fprintf(tw, "%s", conn.Desc)
 		fmt.Fprintf(tw, "\n")
 
 		_ = tw.Flush()
@@ -118,52 +184,41 @@ func entryRemove() error {
 		return err
 	}
 
-	rms, err := fuzzyFilter(func(in io.WriteCloser) {
-		tw := tabwriter.NewWriter(in, 2, 0, 2, ' ', 0)
-		for _, conn := range conns {
-			fmt.Fprintf(tw, "%-16s,", conn.Hostname)
-			fmt.Fprintf(tw, "%-10s,", conn.User)
-			fmt.Fprintf(tw, "%-10s,", conn.Pass)
-			fmt.Fprintf(tw, "%s", conn.Desc)
-			fmt.Fprintf(tw, "\n")
+	rms, err := selectConnections(true)
+	if err != nil {
+		log.Println(err)
+		return err
+	}
 
-			_ = tw.Flush()
-		}
-	}, true)
-	//fmt.Println(rms)
+	for _, r := range rms {
+		fmt.Printf("%s(%s) is removed\n", r.Key, r.Hostname)
+	}
 
-	newConns := []model.Conn{}
 	rmHosts := make(map[string]struct{})
 	for _, r := range rms {
-		splits := strings.Split(r, ",")
-		if len(splits) < 4 {
+		rmHosts[r.Key] = struct{}{}
+	}
+
+	newConns := []model.Conn{}
+	for _, c := range conns {
+		if _, ok := rmHosts[c.Key]; ok {
+			// skip removed conn
 			continue
 		}
-		rmHosts[strings.TrimSpace(splits[0])] = struct{}{}
+		newConns = append(newConns, c)
 	}
 
-	for _, c := range conns {
-		_, ok := rmHosts[c.Hostname]
-		if !ok {
-			newConns = append(newConns, c)
-		}
+	err = writeConfig(newConns, getConfigPath())
+	if err != nil {
+		log.Println(err)
+		return err
 	}
-
-	//err = writeConfig(conns)
-	//if err != nil {
-	//	return err
-	//}
 
 	return nil
 }
 
 func readConfig() ([]model.Conn, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-
-	js, err := ioutil.ReadFile(home + "/.connmgr/conn.json")
+	js, err := ioutil.ReadFile(getConfigPath())
 	if err != nil {
 		return nil, err
 	}
@@ -177,19 +232,21 @@ func readConfig() ([]model.Conn, error) {
 	return conns, nil
 }
 
-func selectConnection(multi bool) (*model.Conn, error) {
+func selectConnections(multi bool) ([]model.Conn, error) {
 	conns, err := readConfig()
 	if err != nil {
 		return nil, err
 	}
+
 	connMap := make(map[string]model.Conn)
 	for _, conn := range conns {
-		connMap[conn.Hostname] = conn
+		connMap[conn.Key] = conn
 	}
 
-	sel, err := fuzzyFilter(func(in io.WriteCloser) {
+	sels, err := fuzzyFilter(func(in io.WriteCloser) {
 		tw := tabwriter.NewWriter(in, 2, 0, 2, ' ', 0)
 		for _, conn := range conns {
+			fmt.Fprintf(tw, "%-8s,", conn.Key)
 			fmt.Fprintf(tw, "%-16s,", conn.Hostname)
 			fmt.Fprintf(tw, "%-10s,", conn.User)
 			fmt.Fprintf(tw, "%-10s,", conn.Pass)
@@ -200,31 +257,70 @@ func selectConnection(multi bool) (*model.Conn, error) {
 		}
 	}, multi)
 
-	splits := strings.Split(sel[0], ",")
-	if len(splits) < 4 {
-		return nil, fmt.Errorf("Bad entry:[%s]", sel)
+	selConns := []model.Conn{}
+
+	for _, sel := range sels {
+		splits := strings.Split(sel, ",")
+		if len(splits) <= 1 {
+			continue
+		} else if len(splits) < 5 {
+			log.Printf("Bad entry:[%s]", sel)
+			continue
+		}
+
+		key := strings.TrimSpace(splits[0])
+		conn, ok := connMap[key]
+		if !ok {
+			log.Printf("Entry not found with key:[%s]", key)
+			continue
+		}
+
+		selConns = append(selConns, conn)
 	}
 
-	conn, ok := connMap[strings.TrimSpace(splits[0])]
-	if !ok {
-		return nil, fmt.Errorf("Entry not found with key:[%s]", splits[0])
+	if len(selConns) < 1 {
+		err = fmt.Errorf("No connection selected")
+		log.Println(err)
+		return nil, err
 	}
-	return &conn, nil
+
+	return selConns, nil
 }
 
-func writeConfig(conns []model.Conn) error {
-	home, err := os.UserHomeDir()
+func selectSingleConnection() (*model.Conn, error) {
+	conns, err := selectConnections(false)
 	if err != nil {
-		return err
+		log.Println(err)
+		return nil, err
 	}
 
+	return &conns[0], nil
+}
+
+func writeConfig(conns []model.Conn, dst string) error {
 	data, err := json.MarshalIndent(conns, "", "\t")
 	if err != nil {
 		return err
 	}
 
-	err = ioutil.WriteFile(home+"/.connmgr/conn.json", data, 0644)
+	err = ioutil.WriteFile(dst, data, 0644)
 	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func backup() error {
+	conns, err := readConfig()
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+
+	err = writeConfig(conns, getBackupConfigPath())
+	if err != nil {
+		log.Println(err)
 		return err
 	}
 
