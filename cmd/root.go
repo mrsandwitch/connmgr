@@ -24,6 +24,7 @@ func init() {
 	rootCmd.AddCommand(cmdScp)
 	rootCmd.AddCommand(cmdIscp)
 	rootCmd.AddCommand(cmdBackup)
+	rootCmd.AddCommand(cmdPubKey)
 }
 
 func Execute() {

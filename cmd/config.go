@@ -250,7 +250,7 @@ func selectConnections(multi bool) ([]model.Conn, error) {
 			fmt.Fprintf(tw, "%-16s,", conn.Hostname)
 			fmt.Fprintf(tw, "%-10s,", conn.User)
 			fmt.Fprintf(tw, "%-10s,", conn.Pass)
-			fmt.Fprintf(tw, "%s", conn.Desc)
+			fmt.Fprintf(tw, "\t%s", conn.Desc)
 			fmt.Fprintf(tw, "\n")
 
 			_ = tw.Flush()

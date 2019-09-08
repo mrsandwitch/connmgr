@@ -79,6 +79,20 @@ var cmdIscp = &cobra.Command{
 	},
 }
 
+var cmdPubKey = &cobra.Command{
+	Use:   "pub",
+	Short: "dump public key",
+	Long:  `dump public key`,
+	Args:  cobra.MinimumNArgs(0),
+	Run: func(cmd *cobra.Command, args []string) {
+		key, err := dumpPubKey()
+		if err != nil {
+			os.Exit(1)
+		}
+		fmt.Println(key)
+	},
+}
+
 func connect() error {
 	conn, err := selectSingleConnection()
 	if err != nil {
@@ -155,6 +169,22 @@ func getSigner() (ssh.Signer, error) {
 	}
 
 	return signer, nil
+}
+
+func dumpPubKey() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	// Get public key
+	pub, err := ioutil.ReadFile(home + "/.ssh/id_rsa.pub")
+	if err != nil {
+		return "", err
+	}
+	pubKey := strings.TrimSuffix(string(pub), "\n")
+
+	return pubKey, nil
 }
 
 // reference form remote-ssh-key-setup.sh
