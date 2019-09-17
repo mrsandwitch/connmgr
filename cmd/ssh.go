@@ -93,6 +93,20 @@ var cmdPubKey = &cobra.Command{
 	},
 }
 
+var useUser = false
+
+func init() {
+	cmdEnableSsh.Flags().BoolVarP(&useUser, "use_user", "u", false, "Use user account ")
+	//rootCmd.PersistentFlags().BoolVarP(&Verbose, "verbose", "v", false, "verbose output")
+
+	rootCmd.AddCommand(cmdConnect)
+	rootCmd.AddCommand(cmdEnableSsh)
+	rootCmd.AddCommand(cmdCommand)
+	rootCmd.AddCommand(cmdScp)
+	rootCmd.AddCommand(cmdIscp)
+	rootCmd.AddCommand(cmdPubKey)
+}
+
 func connect() error {
 	conn, err := selectSingleConnection()
 	if err != nil {
@@ -190,22 +204,10 @@ func dumpPubKey() (string, error) {
 // reference form remote-ssh-key-setup.sh
 //
 func enableRootAccess() error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-
-	// Get public key
-	pub, err := ioutil.ReadFile(home + "/.ssh/id_rsa.pub")
-	if err != nil {
-		return err
-	}
-	pubKey := strings.TrimSuffix(string(pub), "\n")
-
 	// Tell SSH to read in the output of the provided script as the password.
 	// We still have to use setsid to eliminate access to a terminal and thus avoid
 	// it ignoring this and asking for a password.
-	err = os.Setenv("SSH_ASKPASS", "/tmp/ssh-askpass.sh")
+	err := os.Setenv("SSH_ASKPASS", "/tmp/ssh-askpass.sh")
 	if err != nil {
 		log.Println(err)
 		return err
@@ -246,7 +248,7 @@ func enableRootAccess() error {
 		sshOptHostkeyCheck := "-oStrictHostKeyChecking=no"
 		sshOptKnownHostFile := "-oUserKnownHostsFile=/dev/null"
 
-		bashCmd := fmt.Sprintf("echo %s | sudo -S whoami; sudo mkdir -p /root/.ssh/ /var/services/homes/admin; sudo /bin/bash -c 'echo %s >> /root/.ssh/authorized_keys'", conn.Pass, pubKey)
+		bashCmd := fmt.Sprintf("echo %s | sudo -S whoami;", conn.Pass)
 		cmd := exec.Command("setsid", "ssh", "-t", sshOptLogLevel, sshOptHostkeyCheck, sshOptKnownHostFile, addr, bashCmd)
 
 		out, err := cmd.CombinedOutput()

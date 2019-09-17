@@ -15,16 +15,6 @@ func init() {
 	//log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.SetFlags(log.LstdFlags | log.Llongfile)
 
-	rootCmd.AddCommand(cmdAdd)
-	rootCmd.AddCommand(cmdList)
-	rootCmd.AddCommand(cmdRemove)
-	rootCmd.AddCommand(cmdConnect)
-	rootCmd.AddCommand(cmdEnableSsh)
-	rootCmd.AddCommand(cmdCommand)
-	rootCmd.AddCommand(cmdScp)
-	rootCmd.AddCommand(cmdIscp)
-	rootCmd.AddCommand(cmdBackup)
-	rootCmd.AddCommand(cmdPubKey)
 }
 
 func Execute() {

@@ -92,8 +92,25 @@ var cmdBackup = &cobra.Command{
 	},
 }
 
+var cmdVimEdit = &cobra.Command{
+	Use:   "vim",
+	Short: "Use vim to edit config",
+	Long:  `Use vim to edit config`,
+	Args:  cobra.MinimumNArgs(0),
+	Run: func(cmd *cobra.Command, args []string) {
+		err := vimEdit()
+		if err != nil {
+			os.Exit(1)
+		}
+	},
+}
+
 func init() {
-	//cmdAdd.AddCommand(cmdryAdd)
+	rootCmd.AddCommand(cmdAdd)
+	rootCmd.AddCommand(cmdList)
+	rootCmd.AddCommand(cmdRemove)
+	rootCmd.AddCommand(cmdBackup)
+	rootCmd.AddCommand(cmdVimEdit)
 }
 
 const DEFAULT_CONF_PATH = "/.connmgr/conn.json"
@@ -167,8 +184,8 @@ func entryList() error {
 	for _, conn := range conns {
 		fmt.Fprintf(tw, "%-8s", conn.Key)
 		fmt.Fprintf(tw, "%-16s", conn.Hostname)
-		fmt.Fprintf(tw, "%-10s", conn.User)
-		fmt.Fprintf(tw, "%-10s", conn.Pass)
+		fmt.Fprintf(tw, "%-10.10s\t", conn.User)
+		fmt.Fprintf(tw, "%-10.10s\t", conn.Pass)
 		fmt.Fprintf(tw, "%s", conn.Desc)
 		fmt.Fprintf(tw, "\n")
 
@@ -248,9 +265,9 @@ func selectConnections(multi bool) ([]model.Conn, error) {
 		for _, conn := range conns {
 			fmt.Fprintf(tw, "%-8s,", conn.Key)
 			fmt.Fprintf(tw, "%-16s,", conn.Hostname)
-			fmt.Fprintf(tw, "%-10s,", conn.User)
-			fmt.Fprintf(tw, "%-10s,", conn.Pass)
-			fmt.Fprintf(tw, "\t%s", conn.Desc)
+			fmt.Fprintf(tw, "%-10.10s\t,", conn.User)
+			fmt.Fprintf(tw, "%-10.10s\t,", conn.Pass)
+			fmt.Fprintf(tw, "%s", conn.Desc)
 			fmt.Fprintf(tw, "\n")
 
 			_ = tw.Flush()
@@ -381,4 +398,16 @@ func fuzzySearch(inputs []string, multi bool) ([]string, error) {
 		return nil, err
 	}
 	return results, nil
+}
+
+func vimEdit() error {
+	cmd := exec.Command("vim", getConfigPath())
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	err := cmd.Run()
+	if err != nil {
+		panic(err)
+	}
+
+	return nil
 }
