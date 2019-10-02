@@ -226,6 +226,12 @@ func enableRootAccess() error {
 		return err
 	}
 
+	pubKey, err := dumpPubKey()
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+
 	for _, conn := range conns {
 		// Create a temp script to echo the SSH password, used by SSH_ASKPASS
 		script := fmt.Sprintf(`
@@ -248,7 +254,7 @@ func enableRootAccess() error {
 		sshOptHostkeyCheck := "-oStrictHostKeyChecking=no"
 		sshOptKnownHostFile := "-oUserKnownHostsFile=/dev/null"
 
-		bashCmd := fmt.Sprintf("echo %s | sudo -S whoami;", conn.Pass)
+		bashCmd := fmt.Sprintf("echo %s | sudo -S whoami; sudo mkdir -p /root/.ssh/ /var/services/homes/admin; sudo /bin/bash -c 'echo %s >> /root/.ssh/authorized_keys'", conn.Pass, pubKey)
 		cmd := exec.Command("setsid", "ssh", "-t", sshOptLogLevel, sshOptHostkeyCheck, sshOptKnownHostFile, addr, bashCmd)
 
 		out, err := cmd.CombinedOutput()
