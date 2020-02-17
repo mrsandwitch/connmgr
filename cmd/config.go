@@ -159,6 +159,26 @@ func findUnusedKey() (string, error) {
 	return "", fmt.Errorf("Failed to find unused key")
 }
 
+func entryUpdate(entry model.Conn) error {
+	conns, err := readConfig()
+	if err != nil {
+		return err
+	}
+
+	for ix, conn := range conns {
+		if conn.Key == entry.Key {
+			conns[ix] = entry
+		}
+	}
+
+	err = writeConfig(conns, getConfigPath())
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func entryAdd(entry model.Conn) error {
 	conns, err := readConfig()
 	if err != nil {

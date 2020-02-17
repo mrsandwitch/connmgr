@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"bytes"
+	"connmgr/model"
 	"fmt"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
@@ -33,7 +34,7 @@ var cmdEnableSsh = &cobra.Command{
 	Long:  `Enable root ssh access to a host`,
 	Args:  cobra.MinimumNArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
-		err := enableRootAccess()
+		err := enableRootAccessAll()
 		if err != nil {
 			os.Exit(1)
 		}
@@ -111,6 +112,14 @@ func connect() error {
 	conn, err := selectSingleConnection()
 	if err != nil {
 		return err
+	}
+
+	if !conn.RootEnable {
+		fmt.Println("Enabling root access to", conn.Hostname)
+		err := enableRootAccess(conn)
+		if err != nil {
+			log.Println(err)
+		}
 	}
 
 	fmt.Println("Connection to", conn.Hostname)
@@ -202,8 +211,8 @@ func dumpPubKey() (string, error) {
 }
 
 // reference form remote-ssh-key-setup.sh
-//
-func enableRootAccess() error {
+// Enable root access for single node
+func enableRootAccess(conn *model.Conn) error {
 	// Tell SSH to read in the output of the provided script as the password.
 	// We still have to use setsid to eliminate access to a terminal and thus avoid
 	// it ignoring this and asking for a password.
@@ -220,48 +229,66 @@ func enableRootAccess() error {
 		return err
 	}
 
-	conns, err := selectConnections(true)
-	if err != nil {
-		log.Println(err)
-		return err
-	}
-
 	pubKey, err := dumpPubKey()
 	if err != nil {
 		log.Println(err)
 		return err
 	}
 
-	for _, conn := range conns {
-		// Create a temp script to echo the SSH password, used by SSH_ASKPASS
-		script := fmt.Sprintf(`
+	// Create a temp script to echo the SSH password, used by SSH_ASKPASS
+	script := fmt.Sprintf(`
 			#!/bin/sh
 			echo "%s"
 		`, conn.Pass)
 
-		err = ioutil.WriteFile("/tmp/ssh-askpass.sh", []byte(script), 0755)
+	err = ioutil.WriteFile("/tmp/ssh-askpass.sh", []byte(script), 0755)
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+
+	addr := conn.User + "@" + conn.Hostname
+
+	// LogLevel error is to suppress the hosts warning. The others are
+	// necessary if working with development servers with self-signed
+	// certificates.
+	sshOptLogLevel := "-oLogLevel=error"
+	sshOptHostkeyCheck := "-oStrictHostKeyChecking=no"
+	sshOptKnownHostFile := "-oUserKnownHostsFile=/dev/null"
+
+	bashCmd := fmt.Sprintf("echo %s | sudo -S whoami; sudo mkdir -p /root/.ssh/ /var/services/homes/admin; sudo /bin/bash -c 'echo %s >> /root/.ssh/authorized_keys'", conn.Pass, pubKey)
+	cmd := exec.Command("setsid", "ssh", "-t", sshOptLogLevel, sshOptHostkeyCheck, sshOptKnownHostFile, addr, bashCmd)
+
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	err = cmd.Run()
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+
+	conn.RootEnable = true
+	err = entryUpdate(*conn)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// reference form remote-ssh-key-setup.sh
+// Enable root access for all node
+func enableRootAccessAll() error {
+	conns, err := selectConnections(true)
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+
+	for _, conn := range conns {
+		err := enableRootAccess(&conn)
 		if err != nil {
 			log.Println(err)
-			return err
 		}
-
-		addr := conn.User + "@" + conn.Hostname
-
-		// LogLevel error is to suppress the hosts warning. The others are
-		// necessary if working with development servers with self-signed
-		// certificates.
-		sshOptLogLevel := "-oLogLevel=error"
-		sshOptHostkeyCheck := "-oStrictHostKeyChecking=no"
-		sshOptKnownHostFile := "-oUserKnownHostsFile=/dev/null"
-
-		bashCmd := fmt.Sprintf("echo %s | sudo -S whoami; sudo mkdir -p /root/.ssh/ /var/services/homes/admin; sudo /bin/bash -c 'echo %s >> /root/.ssh/authorized_keys'", conn.Pass, pubKey)
-		cmd := exec.Command("setsid", "ssh", "-t", sshOptLogLevel, sshOptHostkeyCheck, sshOptKnownHostFile, addr, bashCmd)
-
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			panic(err)
-		}
-		fmt.Println(string(out))
 	}
 
 	return nil
